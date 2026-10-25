@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_pool_max_overflow: int = 5
     db_statement_timeout_ms: int = 15_000
+    # Session time zone used on every connection. Standard PostgreSQL builds
+    # accept "UTC"; bare-bones local builds without the zoneinfo database may
+    # only accept fixed-offset names such as "GMT".
+    db_timezone: str = "UTC"
 
     # --- Operator authentication ------------------------------------------
     # Exactly one of admin_password_hash / admin_password must be set.

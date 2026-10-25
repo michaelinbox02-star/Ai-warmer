@@ -21,7 +21,7 @@ engine = create_async_engine(
         "server_settings": {
             "application_name": "deliverability-api",
             "statement_timeout": str(settings.db_statement_timeout_ms),
-            "timezone": "UTC",
+            "timezone": settings.db_timezone,
         }
     },
 )

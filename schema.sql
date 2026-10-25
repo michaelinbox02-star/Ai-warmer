@@ -1,7 +1,6 @@
 -- Private Email Deliverability Platform — PostgreSQL schema v1.0
 -- PostgreSQL 16+. Secrets themselves MUST NOT be stored in this database.
-
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- `gen_random_uuid()` is built into PostgreSQL 13+, so no extension is needed.
 
 CREATE TABLE email_accounts (
     id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),

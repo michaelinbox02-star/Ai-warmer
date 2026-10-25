@@ -39,9 +39,11 @@ if (-not $SkipWeb) {
 
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Green
-Write-Host "  1. Copy .env.example to .env and set APP_ENV=local for development."
-Write-Host "  2. Provide a PostgreSQL 16 database and DATABASE_URL."
-Write-Host "  3. Run scripts\migrate.ps1."
-Write-Host "  4. Start the API:  cd api; .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000"
-Write-Host "  5. Start the worker: cd api; .\.venv\Scripts\python.exe -m app.worker"
-Write-Host "  6. Start the UI:   cd web; npm run dev"
+Write-Host "  No Docker? Generate a local .env, migrate, and start everything:"
+Write-Host "    powershell -ExecutionPolicy Bypass -File scripts\start-local.ps1"
+Write-Host "  Or with your own PostgreSQL:"
+Write-Host "    1. Copy .env.example to .env and set APP_ENV=local and DATABASE_URL."
+Write-Host "    2. Run scripts\migrate.ps1."
+Write-Host "    3. Start the API:  cd api; .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000"
+Write-Host "    4. Start the worker: cd api; .\.venv\Scripts\python.exe -m app.worker"
+Write-Host "    5. Start the UI:   cd web; npm run dev"

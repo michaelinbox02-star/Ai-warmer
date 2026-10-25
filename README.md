@@ -87,8 +87,12 @@ web/
   app/(console)/               accounts, messages, tests, reports, suppressions, settings
   components/                  shared UI primitives
 scripts/
-  init-env.ps1                 generate a complete .env with secrets
+  init-env.ps1                 generate a complete .env with secrets (Compose)
   dev.ps1                      local dependency bootstrap
+  local-db.ps1                 start/stop bundled PostgreSQL 16 (no Docker)
+  local_setup.py               create the local role/database and .env
+  start-local.ps1              start database, API, worker, and console
+  stop-local.ps1               stop the local stack
   migrate.ps1                  alembic upgrade head
   backup.py                    encrypted pg_dump + vault archive
   restore.py                   encrypted restore
@@ -175,6 +179,59 @@ production.
 
 ## Local development
 
+### Run without Docker (Windows)
+
+This is the fastest way to use the console on a workstation. It needs Python
+3.11+ and Node 20+, but no Docker and no separately installed PostgreSQL. The
+scripts use the PostgreSQL 16 binaries bundled with the `pgserver` dev
+dependency and keep all data under `var/`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start-local.ps1
+```
+
+The first `start-local.ps1` run:
+
+1. initializes `var\pgdata` and starts PostgreSQL on `127.0.0.1:55432`;
+2. creates the `deliverability` role/database;
+3. writes a local-only `.env` with random database, session, vault, API, and
+   event tokens plus a PBKDF2 operator password hash;
+4. applies Alembic migrations `0001` through `0003`;
+5. starts the API (`127.0.0.1:8000`), sender worker, and console
+   (`127.0.0.1:3000`), building the console if needed.
+
+Open <http://localhost:3000>. The generated operator password is printed once
+and saved to `var\LOCAL_LOGIN.txt`. Save it somewhere safe, then delete that
+file. Logs are in `var\logs`; PIDs are in `var\run`.
+
+```powershell
+# Show status / stop everything (including PostgreSQL)
+powershell -ExecutionPolicy Bypass -File scripts\local-db.ps1 status
+powershell -ExecutionPolicy Bypass -File scripts\stop-local.ps1
+
+# Leave the database running while stopping API, worker, and web
+powershell -ExecutionPolicy Bypass -File scripts\stop-local.ps1 -KeepDatabase
+```
+
+Local limitations:
+
+- `.env` sets `APP_ENV=local` and `DB_TIMEZONE=GMT`. The bundled PostgreSQL
+  build omits the zoneinfo database, so it cannot accept the name `UTC`; `GMT`
+  is the same offset. A normal PostgreSQL 16 server should use `UTC`.
+- The database trusts loopback connections, as does the local vault key in
+  `.env`. Both ports bind to loopback only. Do not reuse this configuration on a
+  shared host or expose it to a network.
+- This local path is for using and evaluating the console. Production still
+  requires the Docker/Compose or equivalent deployment, HTTPS, and the full
+  integration checklist below.
+
+To reset the local installation, stop it, then delete `var\pgdata`, `.env`,
+`var\secrets`, and `var\LOCAL_LOGIN.txt`. This destroys the local database and
+stored provider credentials.
+
+### Use your own PostgreSQL
+
 You need PostgreSQL 16 reachable from the host. The API and worker do not run
 without it.
 
@@ -229,6 +286,7 @@ the annotated list. The most important ones:
 | `APP_ENV` | `local` or `production`. Production enforces strong secrets. |
 | `PUBLIC_BASE_URL` | Operator UI origin; used for OAuth redirects and CSRF/origin checks. |
 | `DATABASE_URL` | `postgresql+asyncpg://...` for the API/worker. Compose overrides the host. |
+| `DB_TIMEZONE` | Session time zone; `UTC` normally, `GMT` only for stripped local builds without zoneinfo. |
 | `POSTGRES_PASSWORD` | Compose-only password for the `db` service. Use URL-safe characters. |
 | `ADMIN_PASSWORD_HASH` | Preferred operator credential (PBKDF2-SHA256). |
 | `ADMIN_PASSWORD` | Local-only plaintext alternative; production requires ≥12 chars. |
@@ -510,19 +568,36 @@ npm run typecheck
 npm run build
 ```
 
+### What has been executed
+
+On Windows, against an isolated PostgreSQL 16.2 instance started by
+`scripts\local-db.ps1` (no Docker):
+
+- Alembic revisions `0001`–`0003` applied cleanly to an empty database;
+- `/readyz` returned `200` with `database: ok` and `secret_store: ok`;
+- operator login, signed session cookies, CSRF-protected account create/delete,
+  and logout through the Next.js `/api/v1` proxy;
+- empty account, message, and suppression listings returned valid payloads;
+- a custom SMTP account was created and deleted through the console API; its
+  password was absent from the PostgreSQL row and from plaintext vault files
+  (the vault stored only Fernet ciphertext).
+
+This validates the local bootstrap, schema, migrations, authentication,
+secret-store encryption, and representative database-backed routes. It does not
+validate the worker/send path.
+
 ### What is not covered here
 
-This repository was built in an environment **without Docker and without
-PostgreSQL**, so the following were not executed during the build:
+Docker itself was unavailable, so the container images and Compose startup
+ordering were not built or executed. The following also remain unexecuted:
 
-- Alembic migrations against a live database;
-- database-backed routes and worker flows (leasing, crash recovery, quota
-  reservations, readiness persistence, suppression, event reactions);
 - a real provider send through Gmail, Microsoft Graph, or SMTP;
+- worker leasing, crash recovery, quota reservations, and readiness,
+  suppression, or circuit transitions driven by real messages;
 - live OAuth redirect/state/PKCE round-trip (helpers are unit-tested with
   mocked token endpoints);
 - `pg_dump`/`pg_restore` and vault archive restore;
-- end-to-end browser flows against a running API.
+- full browser interaction beyond serving the pages and proxying API calls.
 
 The code paths exist and are covered by pure/unit tests where possible, but do
 not treat this as production-verified until you run the integration checklist
@@ -556,10 +631,10 @@ below on a real host.
 | # | Criterion | Status |
 | --- | --- | --- |
 | 1 | OAuth state/PKCE/redirect validation, refresh, revoked tokens | Implemented; refresh/revoked/exchange unit-tested; DB-backed state flow needs integration test |
-| 2 | Secrets absent from DB, logs, browser, AI prompts | Implemented (vault + redaction); unit-tested for redaction/vault; no live DB dump audit |
+| 2 | Secrets absent from DB, logs, browser, AI prompts | Implemented (vault + redaction); unit-tested for redaction/vault; local DB/vault smoke scan passed; logs and AI prompts not exhaustively audited |
 | 3 | SMTP TLS with certificate validation | Implemented and unit-tested; live handshake not run |
 | 4 | Custom SMTP SSRF blocking | Implemented and unit-tested for address classes |
-| 5 | Idempotency prevents duplicates | Implemented (unique index + fingerprint check); unit-tested helpers; DB concurrency not run |
+| 5 | Idempotency prevents duplicates | Implemented (unique index + fingerprint check); unit-tested helpers; account uniqueness exercised; message-create concurrency not run |
 | 6 | Expired worker lease recoverable | Implemented; needs DB integration test |
 | 7 | Quota reservations prevent overrun | Implemented (row-locked reserve/consume/release); needs DB concurrency test |
 | 8 | Acceptance never sets delivered | Implemented and provider-tested; finalize path needs DB test |
@@ -568,7 +643,7 @@ below on a real host.
 | 11 | Diagnostic sends require allowlisted verified recipients | Implemented; needs DB/E2E test |
 | 12 | Hard bounces/complaints suppressed globally | Implemented; pure blocking rules unit-tested; DB behavior needs test |
 | 13 | Circuit breaker opens/recovers | Implemented; decision rules unit-tested; DB transitions need test |
-| 14 | Readiness gate blocks production | Implemented and unit-tested |
+| 14 | Readiness gate blocks production | Implemented and unit-tested; `/readyz` database check passed; production gate not exercised with a real mailbox |
 | 15 | Encrypted backup/restore | Encryption format unit-tested; `pg_dump`/`pg_restore` not executed here |
 
 ---
@@ -578,6 +653,17 @@ below on a real host.
 **`/readyz` returns 503 `secret_store: unavailable`** — check `VAULT_DIR`
 permissions and `VAULT_MASTER_KEY`. In Compose the volume is `/data`; the
 container runs as UID 1001.
+
+**Local `/readyz` says `database: unavailable`** — confirm
+`scripts\local-db.ps1 status` and `DATABASE_URL` port `55432`. If the API log
+mentions `time zone "UTC" not recognized`, the bundled local PostgreSQL build is
+missing zoneinfo: set `DB_TIMEZONE=GMT` in `.env` and restart the API. Normal
+PostgreSQL 16 installations should keep `DB_TIMEZONE=UTC`.
+
+**Local port already in use** — `start-local.ps1` skips a process when its port
+is listening, even if another program owns it. Check `Get-NetTCPConnection
+-LocalPort 3000,8000,55432 -State Listen` and stop the conflicting program, or
+change the port consistently in `.env`, `next.config.ts`, and the start scripts.
 
 **Login says invalid credentials** — `ADMIN_PASSWORD_HASH` wins over
 `ADMIN_PASSWORD`. Re-run `python -m app.cli hash-password` and restart the API.
