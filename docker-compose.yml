@@ -1,0 +1,103 @@
+name: deliverability
+
+x-api-environment: &api-environment
+  DATABASE_URL: postgresql+asyncpg://deliverability:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/deliverability
+  VAULT_DIR: /data/secrets
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+
+x-api-build: &api-build
+  context: .
+  dockerfile: api/Dockerfile
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: deliverability
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: deliverability
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deliverability -d deliverability"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published. Reach it with `docker compose exec db psql ...`.
+    expose:
+      - "5432"
+
+  migrate:
+    build: *api-build
+    env_file:
+      - .env
+    environment: *api-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: *api-build
+    env_file:
+      - .env
+    environment: *api-environment
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "*",
+      ]
+    volumes:
+      - appdata:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build: *api-build
+    env_file:
+      - .env
+    environment: *api-environment
+    command: ["python", "-m", "app.worker"]
+    volumes:
+      - appdata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      args:
+        # Must be reachable from the web container; rewrites are built in.
+        API_INTERNAL_URL: http://api:8000
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:
