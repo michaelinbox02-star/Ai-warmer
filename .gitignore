@@ -1,0 +1,57 @@
+# --- Secrets and local state ------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+master.key
+var/
+data/
+secrets/
+backups/
+*.dump
+*.dump.enc
+*.bak
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+build/
+dist/
+
+# --- Node / Next.js ---------------------------------------------------------
+node_modules/
+.next/
+out/
+.turbo/
+next-env.d.ts.bak
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vercel/
+
+# --- Editors / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs and runtime artifacts --------------------------------------------
+*.log
+logs/
+tmp/
+temp/
